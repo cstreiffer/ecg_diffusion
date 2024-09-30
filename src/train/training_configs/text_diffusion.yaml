@@ -2,6 +2,8 @@ model_name: "text_diffusion"
 model_output_path: 
 mixed_precision: "fp16"
 seed: 17
+seq_length: 500
+n_channels: 12
 metadata_df_paths:
   train_metadata_path: 
   eval_metadata_path: 
@@ -9,7 +11,7 @@ metadata_df_paths:
 batch_size: 16
 gen_eval_batch_size: 16
 num_epochs: 20
-loss_fn: mse_p
+loss_fn: mse
 optimizer: adamw
 optimizer_kwargs:
   lr: 0.0001

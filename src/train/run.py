@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from torch import nn
 from datasets import (
-    EKGDiffusionDataset,
+    ECGDiffusionDataset,
     collate_ecg
 )
 from models import load_model
@@ -11,7 +11,7 @@ from loss import (
 )
 from diffusers.optimization import get_cosine_schedule_with_warmup
 from diffusers import DDPMScheduler, DDIMScheduler
-from transformers import CLIPTokenizer, CLIPTextModel
+from transformers import CLIPModel, AutoTokenizer
 from train_model import train_model
 import os
 from datetime import datetime
@@ -35,10 +35,30 @@ def run(args):
         f'{args.model_name}'
     )
 
+    # Load the tokenizer
+    tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+
+    def tokenize_text(text):
+        input_ids = tokenizer(text, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt").input_ids
+        return input_ids
+        
     # Load the data frames
     dset_class = ECGDiffusionDataset
-    dataset_train = dset_class(**args.train_dataset_settings)
-    dataset_eval = dset_class(**args.eval_dataset_settings)
+    dataset_train = dset_class(metadata_df_path=args.metadata_df_paths['train_metadata_path'], text_transform=tokenize_text)
+    dataset_eval = dset_class(metadata_df_path=args.metadata_df_paths['eval_metadata_path'], text_transform=tokenize_text)
+
+    # Create the random sample
+    random.seed(args.seed)
+    idx = random.sample(range(1, len(dataset_eval) + 1), args.gen_eval_batch_size)
+    dataloader_sample = DataLoader(
+        Subset(dataset_eval, idx),
+        args.gen_eval_batch_size,
+        shuffle=False,
+        collate_fn=collate_ecg,
+        **dataloader_kwargs
+    )
+
+    # Create the dataloader
     dataloader_train = DataLoader(
         dataset_train,
         args.batch_size,
@@ -55,35 +75,18 @@ def run(args):
         **dataloader_kwargs
     )
 
-    # Create the random sample
-    random.seed(args.seed)
-    idx = random.sample(range(1, len(dataset_eval) + 1), args.gen_eval_batch_size)
-    dataloader_sample = DataLoader(
-        Subset(dataset_eval, idx),
-        args.gen_eval_batch_size,
-        shuffle=False,
-        collate_fn=collate_cxr,
-        **dataloader_kwargs
-    )
-
     # Load the model
-    model = load_model(args.model_name, args.dataset_settings['downsample_size'], args.num_feats)
+    model = load_model(args.model_name, args.seq_length, args.n_channels)
 
     # Place the model
     model = model.to(device)
 
-    # Load the tokenizer
+    # Load the text encoder
     text_encoder = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-    tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
     # Place the clip model
     text_encoder = text_encoder.to(device)
 
-    def collate_fn(examples):
-        pixel_values = torch.stack([example["pixel_values"] for example in examples])
-        pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        input_ids = torch.stack([example["input_ids"] for example in examples])
-        return {"pixel_values": pixel_values, "input_ids": input_ids}
     # Define the optimizer
     if args.optimizer == "adam":
         optimizer = torch.optim.Adam
@@ -111,8 +114,11 @@ def run(args):
     elif args.loss_fn == 'mse_p':
         loss_fn = perceptual_loss()
 
+
     metrics = train_model(
         model,
+        text_encoder,
+        tokenizer,
         model_output_path,
         dataloader_train,
         dataloader_eval,

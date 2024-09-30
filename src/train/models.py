@@ -205,13 +205,16 @@ def load_input_diffusion_model(image_size, context_size):
 # encoder_hid_dim_type = "text_proj"
 # cross_attention_dim = 1280
 # 
-def load_text_diffusion_model(image_size, context_size, emb_size):
+def load_text_diffusion_model(n_samples, n_channels):
   model = UNet2DConditionModel(
-    sample_size=image_size,         # the target image resolution, as set above
+    sample_size=(n_channels, n_samples),         # the target image resolution, as set above
     in_channels=1,            # Additional input channels for class cond.
     out_channels=1,           # the number of output channels
     layers_per_block=2,       # how many ResNet layers to use per UNet block
     block_out_channels=(32, 64, 128),
+    encoder_hid_dim=512,
+    cross_attention_dim=128,
+    encoder_hid_dim_type='text_proj',
     down_block_types=(
       "CrossAttnDownBlock2D",
       "CrossAttnDownBlock2D",
@@ -236,8 +239,8 @@ class_mapping = {
   "class_diffusion":       load_class_diffusion_model,
   "class_diffusion_large": load_class_diffusion_model_large
 }
-def load_model(name, image_size, context_size):
-  return class_mapping[name](image_size, context_size)
+def load_model(name, n_samples, n_channels):
+  return class_mapping[name](n_samples, n_channels)
 
 # Load the model state
 def get_device():

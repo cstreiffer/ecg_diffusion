@@ -15,41 +15,48 @@ from torchvision import transforms
 from PIL import Image
 import os
 import sys
+import wfdb
+
+def load_ecg_data(record_path):
+    # Load the signal and metadata using wfdb
+    record = wfdb.rdrecord(record_path)
+    signal = record.p_signal
+    metadata = record.__dict__
+    return signal, metadata
 
 # sys.path.insert(0, "../model/")
 from sklearn.preprocessing import OneHotEncoder
 
-class ECGDataset(Dataset):
+class ECGDiffusionDataset(Dataset):
 
     def __init__(
         self,
         metadata_df_path,
-        text_col
-    )
-    self.metadata = pd.read_csv(metadata_df_path)
+        text_transform
+    ):
+        self.metadata = pd.read_csv(metadata_df_path)
+        self.text_transform = text_transform
 
     def __len__(self):
         return len(set(self.metadata.index))
 
     def __getitem__(self, item):
 
-        image_metadata = self.metadata.loc[item]
-        path = image_metadata["file_path"]
+        ecg_metadata = self.metadata.loc[item]
+        path = ecg_metadata["file_path"]
 
         try:
-            image = Image.open(path)
+            ecg, md = load_ecg_data(path)
+            ecg = torch.from_numpy(ecg[::10, :]).unsqueeze(0)
         except:
             print("Error in reading file {}".format(path))
             return None
 
-        # Apply the transform
-        image = self.transform(image)
-
         # Load the context
-        context = torch.from_numpy(image_metadata[self.label_cols].values.astype(np.float32))
+        token_ids = self.text_transform(ecg_metadata["text"])
 
         # Now return
-        return image, context
+        return ecg, token_ids
 
 class CXRDiffusionDataset(Dataset):
 
@@ -297,10 +304,10 @@ def collate_cxr(batch):
     return torch.utils.data.dataloader.default_collate(batch)
 
 def collate_ecg(examples):
-    ecg_values = torch.stack([example["ecg_values"] for example in examples])
-    ecg_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-    input_ids = torch.stack([example["input_ids"] for example in examples])
-    return {"pixel_values": pixel_values, "input_ids": input_ids}
+    ecg_values = torch.stack([example[0] for example in examples])
+    ecg_values = ecg_values.to(memory_format=torch.contiguous_format).float()
+    input_ids = torch.stack([example[1] for example in examples])
+    return {"ecg_values": ecg_values, "input_ids": input_ids}
 
 def brighten(img):
     cols, rows = img.shape

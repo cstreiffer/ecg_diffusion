@@ -55,15 +55,15 @@ def train_model(
         lr_scheduler
     )
 
-    # Run preprocessing on the text
-    def preprocess_train(examples):
-        # examples["pixel_values"] = [train_transforms(image) for image in images]
-        examples["input_ids"] = tokenizer(examples['caption'], padding=True, return_tensors="pt").input_ids
-        return examples
+    # # Run preprocessing on the text
+    # def preprocess_train(examples):
+    #     examples["pixel_values"] = [train_transforms(ecg) for ecg in ecgs]
+    #     examples["input_ids"] = tokenizer(examples['caption'], padding=True, return_tensors="pt").input_ids
+    #     return examples
 
-    with accelerator.main_process_first():
-        # Set the training transforms
-        train_dataset = dataset["train"].with_transform(preprocess_train)
+    # with accelerator.main_process_first():
+    #     # Set the training transforms
+    #     train_dataset = dataset_train.with_transform(preprocess_train)
 
     # Now turn off gradients
     text_encoder.requires_grad_(False)
@@ -71,26 +71,28 @@ def train_model(
     def train_step(batch):
         model.train()
 
-        clean_images = batch[0]
+        clean_ecgs = batch["ecg_values"]
 
-        # Sample noise to add to the images
-        noise = torch.randn(clean_images.shape, device=clean_images.device)
-        bs = clean_images.shape[0]
+        # Sample noise to add to the ecgs
+        noise = torch.randn(clean_ecgs.shape, device=clean_ecgs.device)
+        bs = clean_ecgs.shape[0]
 
-        # Sample a random timestep for each image
+        # Sample a random timestep for each ecg
         timesteps = torch.randint(
-            0, noise_scheduler.config.num_train_timesteps, (bs,), device=clean_images.device,
+            0, noise_scheduler.config.num_train_timesteps, (bs,), device=clean_ecgs.device,
             dtype=torch.int64
         )
 
-        # Add noise to the clean images according to the noise magnitude at each timestep
-        noisy_images = noise_scheduler.add_noise(clean_images, noise, timesteps)
+        # Add noise to the clean ecgs according to the noise magnitude at each timestep
+        noisy_ecgs = noise_scheduler.add_noise(clean_ecgs, noise, timesteps)
+
+        with torch.no_grad():
+            # Get the hidden states
+            encoder_hidden_states = text_encoder.get_text_features(batch["input_ids"], return_dict=False)
+            encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
 
         with accelerator.accumulate(model):
-            # Get the hidden states
-            encoder_hidden_states = text_encoder.get_text_features(batch[1], return_dict=False)[0]
-
-            noise_pred = model(noisy_images, timesteps, encoder_hidden_states, return_dict=False)[0]
+            noise_pred = model(noisy_ecgs, timesteps, encoder_hidden_states, return_dict=False)[0]
 
             loss = loss_fn(noise_pred, noise)
             accelerator.backward(loss)
@@ -107,73 +109,78 @@ def train_model(
         eval_loss = []
 
         for step, batch in enumerate(tqdm(dataloader_eval)):
-            clean_images = batch[0]
+            clean_ecgs = batch["ecg_values"]
 
-            # Sample noise to add to the images
-            noise = torch.randn(clean_images.shape, device=clean_images.device)
-            bs = clean_images.shape[0]
+            # Sample noise to add to the ecgs
+            noise = torch.randn(clean_ecgs.shape, device=clean_ecgs.device)
+            bs = clean_ecgs.shape[0]
 
-            # Sample a random timestep for each image
+            # Sample a random timestep for each ecg
             timesteps = torch.randint(
-                0, noise_scheduler.config.num_train_timesteps, (bs,), device=clean_images.device,
+                0, noise_scheduler.config.num_train_timesteps, (bs,), device=clean_ecgs.device,
                 dtype=torch.int64
             )
 
-            # Add noise to the clean images according to the noise magnitude at each timestep
-            noisy_images = noise_scheduler.add_noise(clean_images, noise, timesteps)
+            # Add noise to the clean ecgs according to the noise magnitude at each timestep
+            noisy_ecgs = noise_scheduler.add_noise(clean_ecgs, noise, timesteps)
             with torch.no_grad():
-                context = batch[1]
-                noise_pred = model(noisy_images, timesteps, context, return_dict=False)[0]
+                encoder_hidden_states = text_encoder.get_text_features(batch["input_ids"], return_dict=False)
+                encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
+
+                noise_pred = model(noisy_ecgs, timesteps, encoder_hidden_states, return_dict=False)[0]
                 loss = loss_fn(noise_pred, noise)
             eval_loss.append(loss.item())
             
         return eval_loss, np.mean(eval_loss), np.sum(eval_loss)
 
-    def generate_eval_step(step, save_image=True):
+    def generate_eval_step(step, save_ecg=True):
         model.eval()
 
-        # Now get the context and images
-        clean_images, eval_context = next(iter(dataloader_sample))
+        # Now get the context and ecgs
+        batch = next(iter(dataloader_sample))
+        clean_ecgs = batch["ecg_values"]
 
         # Generate the noise
         torch.manual_seed(args.seed)
-        x = torch.randn(clean_images.shape, device=clean_images.device)
+        x = torch.randn(clean_ecgs.shape, device=clean_ecgs.device)
 
         # Sampling loop
         for i, t in tqdm(enumerate(noise_scheduler.timesteps)):
 
             # Get model pred
             with torch.no_grad():
-                residual = model(x, t, context=eval_context, return_dict=False)  # Again, note that we pass in our labels y
+                encoder_hidden_states = text_encoder.get_text_features(batch["input_ids"], return_dict=False)
+                encoder_hidden_states = encoder_hidden_states.unsqueeze(1)
+                residual = model(x, t, encoder_hidden_states, return_dict=False)  # Again, note that we pass in our labels y
 
             # Update sample with step
             x = noise_scheduler.step(residual[0], t, x).prev_sample
 
-        # Now return the x and images
-        loss = loss_fn(x, clean_images)
+        # Now return the x and ecgs
+        loss = loss_fn(x, clean_ecgs)
 
-        # Prepare images for saving
-        generated_images = x.detach().cpu().clip(-1, 1)
-        clean_images = clean_images.detach().cpu().clip(-1, 1)
+        # Prepare ecgs for saving
+        generated_ecgs = x.detach().cpu().clip(-1, 1)
+        clean_ecgs = clean_ecgs.detach().cpu().clip(-1, 1)
 
-        # Create grids of images
-        if save_image:
-            generated_grid = make_grid(generated_images, nrow=4, padding=2, pad_value=1)
-            clean_grid = make_grid(clean_images, nrow=4, padding=2, pad_value=1)
+        # # Create grids of ecgs
+        # if save_ecg:
+        #     # generated_grid = make_grid(generated_ecgs, nrow=4, padding=2, pad_value=1)
+        #     # clean_grid = make_grid(clean_ecgs, nrow=4, padding=2, pad_value=1)
 
-            # Concatenate grids horizontally
-            combined_grid = torch.cat((generated_grid, clean_grid), dim=-1)  # Concatenate along width
+        #     # Concatenate grids horizontally
+        #     combined_grid = torch.cat((generated_grid, clean_grid), dim=-1)  # Concatenate along width
 
-            # Plotting
-            plt.figure(figsize=(8, 4))  # Adjust size to accommodate both grids
-            plt.imshow(combined_grid.permute(1, 2, 0))  # Permute tensor to image format for matplotlib
-            plt.axis('off')  # Hide axes
+        #     # Plotting
+        #     plt.figure(figsize=(8, 4))  # Adjust size to accommodate both grids
+        #     plt.imshow(combined_grid.permute(1, 2, 0))  # Permute tensor to ecg format for matplotlib
+        #     plt.axis('off')  # Hide axes
 
-            # Save the image
-            plt.savefig(f"{samples_dir}/sample_{step:08d}.png", bbox_inches='tight', pad_inches=0.5)
-            plt.close()
+        #     # Save the ecg
+        #     plt.savefig(f"{samples_dir}/sample_{step:08d}.png", bbox_inches='tight', pad_inches=0.5)
+        #     plt.close()
 
-        return x, clean_images, loss.item()
+        return x, clean_ecgs, loss.item()
 
     # Now let's iterate
     global_step = 0
@@ -211,13 +218,13 @@ def train_model(
                 all_stats["eval_loss"].append(mean_eval_loss)
                 display_stats["D - Val Loss"] = mean_eval_loss
 
-            if global_step % args.gen_eval_every_x_batches == 0:
-                # Run gen eval
-                gen_images, clean_images, gen_eval_loss = generate_eval_step(global_step)
+            # if global_step % args.gen_eval_every_x_batches == 0:
+            #     # Run gen eval
+            #     gen_ecgs, clean_ecgs, gen_eval_loss = generate_eval_step(global_step)
 
-                # Update stats
-                all_stats["gen_eval_loss"].append(gen_eval_loss)
-                display_stats["E - Gen Eval Loss"] = gen_eval_loss
+            #     # Update stats
+            #     all_stats["gen_eval_loss"].append(gen_eval_loss)
+            #     display_stats["E - Gen Eval Loss"] = gen_eval_loss
 
             # Increment the global_step
             global_step += 1
