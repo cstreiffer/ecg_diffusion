@@ -1,8 +1,8 @@
-model_name: "text_diffusion"
+model_name: "basic_diffusion"
 model_output_path: 
 mixed_precision: "fp16"
 seed: 17
-seq_length: 500
+seq_length: 1000
 n_channels: 12
 metadata_df_paths:
   train_metadata_path: 

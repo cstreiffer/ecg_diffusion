@@ -47,7 +47,9 @@ class ECGDiffusionDataset(Dataset):
 
         try:
             ecg, md = load_ecg_data(path)
-            ecg = torch.from_numpy(ecg[::10, :]).unsqueeze(0)
+            # ecg = torch.from_numpy(ecg[::5, :].T)
+            ecg = torch.from_numpy(ecg[::5, :]).unsqueeze(0)
+            
         except:
             print("Error in reading file {}".format(path))
             return None

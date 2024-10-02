@@ -67,19 +67,16 @@ class BasicUnet(nn.Module):
     self.model = model
 
   def forward(self, x, t, context, return_dict=False):
-    return self.model(net_input, t, return_dict=return_dict)
+    return self.model(x, t, return_dict=return_dict)
 
-def load_basic_diffusion_model(image_size, context_size):
+def load_basic_diffusion_model(n_samples, n_channels, context_size):
   model = UNet2DModel(
-      sample_size=image_size,  # the target image resolution
+      sample_size=(n_channels, n_samples),  # the target image resolution
       in_channels=1,  # the number of input channels, 3 for RGB images
       out_channels=1,  # the number of output channels
       layers_per_block=2,  # how many ResNet layers to use per UNet block
-      block_out_channels=(128, 128, 256, 256, 512, 512),  # the number of output channels for each UNet block
+      block_out_channels=(64, 128, 256),  # the number of output channels for each UNet block
       down_block_types=(
-          "DownBlock2D",  # a regular ResNet downsampling block
-          "DownBlock2D",
-          "DownBlock2D",
           "DownBlock2D",
           "AttnDownBlock2D",  # a ResNet downsampling block with spatial self-attention
           "DownBlock2D",
@@ -88,16 +85,13 @@ def load_basic_diffusion_model(image_size, context_size):
           "UpBlock2D",  # a regular ResNet upsampling block
           "AttnUpBlock2D",  # a ResNet upsampling block with spatial self-attention
           "UpBlock2D",
-          "UpBlock2D",
-          "UpBlock2D",
-          "UpBlock2D",
       ),
   )
   return BasicUnet(model)
 
-def load_class_diffusion_model(image_size, context_size):
+def load_class_diffusion_model(n_samples, n_channels, context_size):
   model = UNet2DModel(
-      sample_size=image_size,  # the target image resolution
+      sample_size=(n_channels, n_samples),  # the target image resolution
       in_channels=1,  # the number of input channels, 3 for RGB images
       out_channels=1,  # the number of output channels
       layers_per_block=2,  # how many ResNet layers to use per UNet block
@@ -122,9 +116,9 @@ def load_class_diffusion_model(image_size, context_size):
   )
   return ClassConditionedUnet(model, context_size, n_channels=128)
 
-def load_class_diffusion_model_large(image_size, context_size):
+def load_class_diffusion_model_large(n_samples, n_channels, context_size):
   model = UNet2DModel(
-      sample_size=image_size,  # the target image resolution
+      sample_size=(n_channels, n_samples),  # the target image resolution
       in_channels=1,  # the number of input channels, 3 for RGB images
       out_channels=1,  # the number of output channels
       layers_per_block=2,
@@ -239,8 +233,8 @@ class_mapping = {
   "class_diffusion":       load_class_diffusion_model,
   "class_diffusion_large": load_class_diffusion_model_large
 }
-def load_model(name, n_samples, n_channels):
-  return class_mapping[name](n_samples, n_channels)
+def load_model(name, n_samples, n_channels, context_size):
+  return class_mapping[name](n_samples, n_channels, context_size)
 
 # Load the model state
 def get_device():
