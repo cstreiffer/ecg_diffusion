@@ -55,16 +55,6 @@ def train_model(
         lr_scheduler
     )
 
-    # # Run preprocessing on the text
-    # def preprocess_train(examples):
-    #     examples["pixel_values"] = [train_transforms(ecg) for ecg in ecgs]
-    #     examples["input_ids"] = tokenizer(examples['caption'], padding=True, return_tensors="pt").input_ids
-    #     return examples
-
-    # with accelerator.main_process_first():
-    #     # Set the training transforms
-    #     train_dataset = dataset_train.with_transform(preprocess_train)
-
     # Now turn off gradients
     text_encoder.requires_grad_(False)
 
@@ -134,6 +124,23 @@ def train_model(
         return eval_loss, np.mean(eval_loss), np.sum(eval_loss)
 
     def generate_eval_step(step, save_ecg=True):
+        
+        def plot_ecg(signal, output_type, batch_id, step, text=None, show=True):
+            # Create a figure
+            plt.figure(figsize=(20, 10))
+            
+            # Plot each channel in the ECG signal (e.g., Lead I, Lead II)
+            for channel in range(signal.shape[1]):
+                plt.plot(signal[:, channel] + 2 * channel, label=f'Lead {channel + 1}')
+           
+            # Add text if provided
+            if text is not None:
+                plt.figtext(0.5, -0.05, text, wrap=True, horizontalalignment='center', fontsize=18)
+
+            plt.savefig(f"{samples_dir}/sample_{batch_id:03d}_{output_type}_{step:08d}.png", bbox_inches='tight')
+            plt.close()
+
+        # Run this
         model.eval()
 
         # Now get the context and ecgs
@@ -145,7 +152,8 @@ def train_model(
         x = torch.randn(clean_ecgs.shape, device=clean_ecgs.device)
 
         # Sampling loop
-        for i, t in tqdm(enumerate(noise_scheduler.timesteps)):
+        # for i, t in tqdm(enumerate(noise_scheduler.timesteps)):
+        for i, t in tqdm(enumerate(range(10))):
 
             # Get model pred
             with torch.no_grad():
@@ -160,25 +168,14 @@ def train_model(
         loss = loss_fn(x, clean_ecgs)
 
         # Prepare ecgs for saving
-        generated_ecgs = x.detach().cpu().clip(-1, 1)
-        clean_ecgs = clean_ecgs.detach().cpu().clip(-1, 1)
+        generated_ecgs = x.squeeze().detach().cpu().numpy()
+        clean_ecgs = clean_ecgs.squeeze().detach().cpu().numpy()
 
-        # # Create grids of ecgs
-        # if save_ecg:
-        #     # generated_grid = make_grid(generated_ecgs, nrow=4, padding=2, pad_value=1)
-        #     # clean_grid = make_grid(clean_ecgs, nrow=4, padding=2, pad_value=1)
-
-        #     # Concatenate grids horizontally
-        #     combined_grid = torch.cat((generated_grid, clean_grid), dim=-1)  # Concatenate along width
-
-        #     # Plotting
-        #     plt.figure(figsize=(8, 4))  # Adjust size to accommodate both grids
-        #     plt.imshow(combined_grid.permute(1, 2, 0))  # Permute tensor to ecg format for matplotlib
-        #     plt.axis('off')  # Hide axes
-
-        #     # Save the ecg
-        #     plt.savefig(f"{samples_dir}/sample_{step:08d}.png", bbox_inches='tight', pad_inches=0.5)
-        #     plt.close()
+        # Create grids of ecgs
+        if save_ecg:
+            for i in range(x.shape[0]):
+                plot_ecg(generated_ecgs[i], "gen", i, step, text=batch["text"][i])
+                plot_ecg(clean_ecgs[i], "org", i, step, text=batch["text"][i])
 
         return x, clean_ecgs, loss.item()
 
@@ -218,13 +215,13 @@ def train_model(
                 all_stats["eval_loss"].append(mean_eval_loss)
                 display_stats["D - Val Loss"] = mean_eval_loss
 
-            # if global_step % args.gen_eval_every_x_batches == 0:
-            #     # Run gen eval
-            #     gen_ecgs, clean_ecgs, gen_eval_loss = generate_eval_step(global_step)
+            if global_step % args.gen_eval_every_x_batches == 0:
+                # Run gen eval
+                gen_ecgs, clean_ecgs, gen_eval_loss = generate_eval_step(global_step)
 
-            #     # Update stats
-            #     all_stats["gen_eval_loss"].append(gen_eval_loss)
-            #     display_stats["E - Gen Eval Loss"] = gen_eval_loss
+                # Update stats
+                all_stats["gen_eval_loss"].append(gen_eval_loss)
+                display_stats["E - Gen Eval Loss"] = gen_eval_loss
 
             # Increment the global_step
             global_step += 1

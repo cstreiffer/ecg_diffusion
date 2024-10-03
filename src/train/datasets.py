@@ -58,7 +58,7 @@ class ECGDiffusionDataset(Dataset):
         token_ids = self.text_transform(ecg_metadata["text"])
 
         # Now return
-        return ecg, token_ids
+        return ecg, token_ids, ecg_metadata["text"]
 
 class CXRDiffusionDataset(Dataset):
 
@@ -309,7 +309,8 @@ def collate_ecg(examples):
     ecg_values = torch.stack([example[0] for example in examples])
     ecg_values = ecg_values.to(memory_format=torch.contiguous_format).float()
     input_ids = torch.stack([example[1] for example in examples])
-    return {"ecg_values": ecg_values, "input_ids": input_ids}
+    text = torch.stack([example[2] for example in examples])
+    return {"ecg_values": ecg_values, "input_ids": input_ids, "text": text}
 
 def brighten(img):
     cols, rows = img.shape

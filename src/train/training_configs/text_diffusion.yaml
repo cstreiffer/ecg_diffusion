@@ -8,9 +8,9 @@ metadata_df_paths:
   train_metadata_path: 
   eval_metadata_path: 
   test_metadata_path:
-batch_size: 32
+batch_size: 64
 gen_eval_batch_size: 32
-num_epochs: 5
+num_epochs: 20
 loss_fn: mse
 optimizer: adamw
 optimizer_kwargs:
@@ -21,8 +21,8 @@ noise_scheduler_kwargs:
   beta_schedule: "squaredcos_cap_v2"
 cuda_idx: 0
 accumulate_grads_every_x_steps: 1
-gen_eval_every_x_batches: 2000
-eval_metrics_every_x_batches: 2000
+gen_eval_every_x_batches: 155
+eval_metrics_every_x_batches: 155
 save_model_epochs: 2
 push_to_hub: false
 hub_model_id: "None"
